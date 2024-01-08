@@ -8,53 +8,61 @@ import { objectifyHeaders, readableStreamToBuffer } from './utils';
 const emitter = new Emitter<LifeCycleEventsMap>();
 
 export const handleRoute = async (route: Route, handlers: RequestHandler[]) => {
-  const request = route.request();
-  const method = request.method();
-  const url = new URL(request.url());
-  const headers = await request.allHeaders();
-  const postData = request.postData();
-
   try {
-    await handleRequest(
-      new Request(url, {
-        method,
-        headers,
-        body: postData ? Buffer.from(postData) : undefined,
-      }),
-      randomUUID(),
-      // Reverse array so that handlers that were most recently appended are processed first
-      handlers.slice().reverse(),
-      {
-        onUnhandledRequest: () => route.continue(),
-      },
-      emitter,
-      {
-        resolutionContext: {
-          /**
-           * @note Resolve relative request handler URLs against
-           * the server's origin (no relative URLs in Node.js).
-           */
-          baseUrl: url.origin,
+    const request = route.request();
+    const method = request.method();
+    const url = new URL(request.url());
+    const headers = await request.allHeaders();
+    const postData = request.postData();
+  
+    try {
+      await handleRequest(
+        new Request(url, {
+          method,
+          headers,
+          body: postData ? Buffer.from(postData) : undefined,
+        }),
+        randomUUID(),
+        // Reverse array so that handlers that were most recently appended are processed first
+        handlers.slice().reverse(),
+        {
+          onUnhandledRequest: () => route.continue(),
         },
-        onMockedResponse: async ({
-          status,
-          headers: rawHeaders,
-          body: rawBody,
-        }) => {
-          const contentType = rawHeaders.get('content-type') ?? undefined;
-          const headers = objectifyHeaders(rawHeaders);
-          const body = await readableStreamToBuffer(contentType, rawBody);
-
-          return route.fulfill({
+        emitter,
+        {
+          resolutionContext: {
+            /**
+             * @note Resolve relative request handler URLs against
+             * the server's origin (no relative URLs in Node.js).
+             */
+            baseUrl: url.origin,
+          },
+          onMockedResponse: async ({
             status,
-            body,
-            contentType,
-            headers,
-          });
+            headers: rawHeaders,
+            body: rawBody,
+          }) => {
+            const contentType = rawHeaders.get('content-type') ?? undefined;
+            const headers = objectifyHeaders(rawHeaders);
+            const body = await readableStreamToBuffer(contentType, rawBody);
+  
+            return route.fulfill({
+              status,
+              body,
+              contentType,
+              headers,
+            });
+          },
         },
-      },
-    );
-  } catch {
-    await route.abort();
+      );
+    } catch {
+      await route.abort();
+    }
+  } catch (error) {
+    if (e.message === 'request.allHeaders: Target page, context or browser has been closed') {
+      await route.abort();
+    }
+
+    throw error;
   }
 };
